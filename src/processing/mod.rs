@@ -1,2 +1,2 @@
-pub mod images;
 pub mod filetype;
+pub mod images;

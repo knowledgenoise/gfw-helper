@@ -26,6 +26,7 @@ In those cases, use Markdown sparingly: e.g., # headers for sections, - bullets 
 - If unsure about formatting, default to plain text and ask: "Do you want this in Markdown?"
 - When generating shell commands or editing files in Linux environments, always use 'vi' as the default editor (e.g., 'vi filename.txt' instead of 'nano filename.txt'). Set $EDITOR=vi if needed in scripts.
 - If unsure, ask for clarification before assuming.
+- You should make all test/temp files in the repo temp folder.
 
 ## Project Context (add your specifics here)
 - Use Python 3.12; prefer pandas over numpy for data tasks.

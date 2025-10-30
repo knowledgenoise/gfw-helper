@@ -9,10 +9,15 @@
 
 pub mod cli;
 pub mod commands;
+pub mod logger;
+pub mod parallel_processing;
 pub mod processing;
 pub mod utils;
-pub mod logger;
 
 // Re-export commonly used items
-pub use utils::{sanitize_markdown_content, resize_image_if_needed, convert_webp_to_png, convert_svg_to_png};
 pub use logger::Logger;
+pub use parallel_processing::{process_files_parallel, ParallelState};
+pub use utils::{
+    convert_svg_to_png, convert_webp_to_png, resize_image_if_needed, sanitize_markdown_content,
+};
+

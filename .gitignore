@@ -1,19 +1,5 @@
-# Rust build artifacts
 /target
-
-# Project-specific data and files
+/cargo.lock
 /data
 /prompt.md
 /lcov.info
-
-# Backup files
-**/*.rs.bk
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db

@@ -7,14 +7,16 @@
 - **统一文档处理**：自动检测员工/项目类型，将 HTML 文档目录转换为整合的 Markdown 文件
 - **自包含输出**：自动复制所有链接的资源（图像、附件）到配套文件夹，生成可移植的文档包
 - **JIRA 问题处理**：处理 JIRA 问题 JSON 导出并生成带有问题跟踪的整合 Markdown 文档
-- **高级 PDF 生成**：将 Markdown 转换为专业 PDF，自动处理图像、支持中文字符、SVG 和 draw.io 转换
+- **Git 仓库处理**：递归提取 Git 仓库中的 README.md 文件，包含链接资源和嵌入的 markdown 文件
+- **高级 PDF 生成**：将 Markdown 转换为专业 PDF，自动处理图像、支持多语言（中文和俄语/西里尔字符）、SVG 和 draw.io 转换
 - **并行处理**：并发 HTML 到 Markdown 转换和 PDF 生成，实时进度跟踪，显著提高批量操作速度
 - **优化日志**：线程安全的日志输出，带进度条和统计摘要，并行执行时输出清晰
 - **文件分割**：将大型 Markdown 文件分割为可管理的块，便于处理或版本控制
 - **图像优化**：自动调整超大图像尺寸，防止 LaTeX 编译错误
 - **WebP 支持**：自动将 WebP 图像转换为 PNG 格式，兼容 LaTeX
 - **SVG 和 Draw.io 支持**：自动检测并转换 SVG 内容和 draw.io XML 文件（即使扩展名为 PNG）为 PNG 格式
-- **中文语言支持**：完整的 Unicode 支持，正确处理中文字符的字体
+- **中文语言支持**：使用 ctexart 文档类完整支持 Unicode 和中文字符的正确字体处理
+- **西里尔/俄语支持**：使用 fontspec 和 DejaVu Sans 字体正确处理俄语和其他西里尔语言
 - **批量处理**：处理整个目录的 Markdown 文件
 - **错误恢复**：强大的错误处理，具有 LaTeX 编译失败的重试逻辑
 - **完整工作流自动化**：单个命令处理 HTML → Markdown → 分割 → PDF
@@ -102,7 +104,10 @@ cargo build --release
 
 ## 使用方法
 
-主要工作流程：**HTML → Markdown → 分割 → PDF** 或 **JIRA JSON → Markdown → PDF**
+主要工作流程：
+- **HTML → Markdown → 分割 → PDF**（Confluence 文档）
+- **JIRA JSON → Markdown → PDF**（JIRA 问题）
+- **Git README → 分割 → PDF**（Git 仓库）
 
 ### 1. 将 HTML 文档转换为 Markdown（统一命令）
 
@@ -167,7 +172,39 @@ employee-name-张三-15_files/        # 资源文件夹
 
 所有 markdown 链接会自动更新以引用修正后的文件名，确保文档的完整性。
 
-### 2. 将 JIRA 问题处理为 Markdown
+### 2. 提取 Git 仓库 README 文件
+
+提取并处理 Git 仓库中的 README.md 文件：
+
+```bash
+# 递归查找 Git 仓库并提取 README 文件
+gfw-helper git-readme /path/to/repos
+
+# 输出到特定目录
+gfw-helper git-readme /path/to/repos -o ./output
+```
+
+这将：
+- 递归扫描 Git 仓库（包含 `.git` 的目录）
+- 从每个仓库中提取 README.md 或 readme.md 文件
+- 将所有引用的图像和文件复制到 `<repo-name>-files` 目录
+- 嵌入链接的 markdown 文件并调整标题级别
+- 验证图像和归档文件的文件类型
+- 在输出目录中生成 `<repo-name>-README.md` 文件
+
+**输出结构示例：**
+```
+output/
+├── project1-README.md
+├── project1-files/
+│   ├── screenshot.png
+│   └── diagram.svg
+├── project2-README.md
+└── project2-files/
+    └── logo.png
+```
+
+### 3. 将 JIRA 问题处理为 Markdown
 
 处理 JIRA 问题 JSON 导出并生成整合文档：
 
@@ -185,7 +222,7 @@ gfw-helper jira /path/to/jira/data -o ./output
 - 生成按时间顺序排序的整合 Markdown 文件
 - 包含时间成本计算和正确格式
 
-### 3. 分割大型 Markdown 文件（可选）
+### 4. 分割大型 Markdown 文件（可选）
 
 如果您有需要分割的大型 Markdown 文件：
 
@@ -200,7 +237,7 @@ gfw-helper split ./docs --size-threshold 5.0
 gfw-helper split large-file.md -o ./split_output
 ```
 
-### 4. 将 Markdown 转换为 PDF
+### 5. 将 Markdown 转换为 PDF
 
 将 Markdown 文件转换为高质量 PDF，自动处理图像：
 
@@ -227,9 +264,10 @@ gfw-helper pdf ./docs --output-dir ./output
 - WebP 转 PNG，兼容 LaTeX
 - SVG 和 draw.io 文件检测并转换为 PNG（使用 Inkscape）
 - 格式验证和损坏图像检测
+- 多语言支持：中文（ctexart）、西里尔/俄语（fontspec 配合 DejaVu Sans）
 - 临时目录处理（原文件不变）
 
-### 5. 完整工作流自动化
+### 6. 完整工作流自动化
 
 使用 `html2pdf` 命令进行端到端处理：
 
@@ -249,47 +287,19 @@ gfw-helper html2pdf /path/to/data --output-dir results/
 
 # 完整 JIRA 工作流：JSON → Markdown → 分割 → PDF
 gfw-helper jira2pdf /path/to/jira/data -o ./jira_output
-```
 
-### 4. 将 Markdown 转换为 PDF
-
-将 Markdown 文件转换为高质量 PDF：
-
-```bash
-# 转换单个 Markdown 文件
-gfw-helper pdf --path document.md
-
-# 转换目录中的所有 Markdown 文件
-gfw-helper pdf --directory ./docs
-
-# 指定 LaTeX 引擎（推荐使用 lualatex 以获得中文支持）
-gfw-helper pdf --path document.md --engine lualatex
-```
-
-### 完整工作流程示例
-
-```bash
-# 1. 将 HTML 文档处理为 Markdown
-gfw-helper employee --path ./data
-
-# 2. 分割任何大型文件（可选）
-gfw-helper split --directory ./data --size-threshold 2.5
-
-# 3. 转换为 PDF
-gfw-helper pdf --directory ./data --engine lualatex
-
-# 替代方案：处理 JIRA 问题
-gfw-helper jira --path /path/to/jira/data
-gfw-helper pdf --path /path/to/jira/data/jira_export.md --engine lualatex
+# 完整 Git README 工作流：提取 → 分割 → PDF
+gfw-helper readme2pdf /path/to/repos -o ./readme_output
+gfw-helper readme2pdf /path/to/repos --lines 30000 --engine xelatex
 ```
 
 ## PDF 引擎
 
 根据您的内容选择合适的 LaTeX 引擎：
 
-- **`lualatex`** （推荐）：最佳中文/Unicode 支持，使用 ctexart 文档类
-- **`xelatex`**：良好的中文支持，复杂文档的替代选择
-- **`pdflatex`**：基本引擎，最快但中文字符支持有限
+- **`lualatex`** （推荐）：最佳多语言/Unicode 支持，使用 ctexart 支持中文，使用 fontspec 支持西里尔/俄语
+- **`xelatex`**：良好的 Unicode 支持，复杂文档的替代选择
+- **`pdflatex`**：基本引擎，最快但 Unicode 支持有限
 
 ## 图像处理
 
@@ -421,6 +431,25 @@ OPTIONS:
 - 包含问题详情、评论、附件和时间跟踪
 - 按创建时间顺序排序问题
 
+### Git README 命令
+```bash
+gfw-helper git-readme <path> [OPTIONS]
+
+OPTIONS:
+    -o, --output-dir <DIR>  生成文件的输出目录 [默认：当前目录]
+```
+
+递归提取 Git 仓库中的 README.md 文件及链接资源。
+
+**功能特性：**
+- 递归搜索 Git 仓库（检查 `.git` 文件夹）
+- 从每个仓库中提取 README.md 或 readme.md
+- 将所有引用的图像和文件复制到 `<repo-name>-files` 目录
+- 嵌入链接的 markdown 文件并调整标题级别（## → ###）
+- 验证图像和归档文件的文件类型
+- 并行处理多个仓库
+- 在输出目录中生成 `<repo-name>-README.md` 文件
+
 ### PDF 命令
 ```bash
 gfw-helper pdf <path> [OPTIONS]
@@ -435,7 +464,7 @@ OPTIONS:
 **PDF 功能：**
 - 自动调整图像大小（最大 4000x4000px）
 - SVG 和 draw.io 文件转换为 PNG
-- 使用 ctexart 支持中文字符
+- 多语言支持：中文（ctexart）、西里尔/俄语（fontspec 配合 DejaVu Sans）
 - 使用 pygments 进行语法高亮
 - LaTeX 错误的重试逻辑
 
@@ -477,6 +506,18 @@ OPTIONS:
 ```
 
 单个命令完成 JIRA 工作流：JSON → Markdown → 分割 → PDF。
+
+```bash
+gfw-helper readme2pdf <directory> [OPTIONS]
+
+OPTIONS:
+    --lines <LINES>           每个分割文件的行数 [默认：50000]
+    --size-threshold <MB>     分割的大小阈值 [默认：2.5]
+    --engine <ENGINE>         PDF 引擎 [默认：lualatex]
+    -o, --output-dir <DIR>    所有生成文件的输出目录 [默认：当前目录]
+```
+
+Git 仓库完整工作流：提取 README → 分割 → PDF。
 
 ## 开发和测试
 
@@ -559,6 +600,61 @@ cargo run -- md /path/to/data
 - 运行 `inkscape --version` 验证 Inkscape 安装
 - 运行 `lualatex --version`（或 `xelatex --version`）验证 LaTeX 安装
 - 确保所有工具都可在系统 PATH 中访问
+
+### 字体错误（俄语/西里尔字母支持）
+
+**自动字体检测：**
+该工具会自动检测是否安装了 **DejaVu Sans** 并使用它来增强西里尔/俄语支持。如果未找到，则回退到 **Arial**（普遍可用）。
+
+**检查正在使用的字体：**
+```bash
+cargo run -- pdf your-file.md -o output --verbose
+# 查找："DejaVu Sans font detected" 或 "DejaVu Sans not found - using Arial"
+```
+
+**为获得更好的西里尔/俄语支持：**
+安装 **DejaVu Sans** 字体 - 工具将自动检测并使用它们：
+
+**Windows（以管理员身份运行 PowerShell）：**
+```powershell
+# 下载 DejaVu Sans 字体
+Invoke-WebRequest -Uri "https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.zip" -OutFile "$env:TEMP\dejavu-fonts.zip"
+Expand-Archive -Path "$env:TEMP\dejavu-fonts.zip" -DestinationPath "$env:TEMP\dejavu-fonts" -Force
+
+# 安装字体
+$fonts = Get-ChildItem "$env:TEMP\dejavu-fonts\dejavu-fonts-ttf-2.37\ttf\*.ttf"
+$fontsFolder = (New-Object -ComObject Shell.Application).Namespace(0x14)
+foreach ($font in $fonts) {
+    $fontsFolder.CopyHere($font.FullName, 0x10)
+}
+Write-Host "DejaVu 字体已安装。工具将在下次运行时自动检测。"
+```
+
+**Linux（Ubuntu/Debian）：**
+```bash
+sudo apt update
+sudo apt install fonts-dejavu fonts-dejavu-extra
+fc-cache -fv
+```
+
+**Linux（Fedora/RHEL）：**
+```bash
+sudo dnf install dejavu-sans-fonts dejavu-sans-mono-fonts
+fc-cache -fv
+```
+
+**macOS：**
+```bash
+brew tap homebrew/cask-fonts
+brew install --cask font-dejavu
+```
+
+安装后，验证：
+```bash
+fc-list | grep -i dejavu  # Linux/macOS
+```
+
+**注意：** 无需更改代码或重新构建 - 工具会在运行时自动检测已安装的字体。
 
 ### 常见错误消息
 

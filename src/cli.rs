@@ -14,7 +14,7 @@ FEATURES:
 - Process employee directories (starting with ~) and generate consolidated markdown files
 - Process project directories and create organized documentation
 - Process JIRA issue JSON files and generate consolidated markdown with issue tracking
-- Convert markdown to PDF with automatic image resizing and Chinese font support
+- Convert markdown to PDF with automatic image resizing and multi-language font support
 - Split large markdown files into manageable chunks
 - Complete workflow automation (HTML → Markdown → Split → PDF)
 - Handle complex documents with images, tables, and code blocks
@@ -23,7 +23,7 @@ FEATURES:
 
 PDF CONVERSION FEATURES:
 - Automatic image resizing to prevent LaTeX 'Dimension too large' errors (max 4000x4000)
-- Chinese character support using ctexart document class with lualatex
+- Multi-language support: Chinese (via ctexart) and Cyrillic/Russian (via fontspec)
 - Syntax highlighting with pygments
 - Color links and proper margins
 - Graceful handling of corrupted/invalid images
@@ -86,17 +86,9 @@ NOTES:
 - PDF conversion automatically resizes images >4000px to prevent LaTeX errors
 - Chinese characters are preserved using ctexart document class
 - Invalid/corrupted images are skipped with warnings
-- Temporary files are automatically cleaned up after processing"#
-
-NOTES:
-- All output files are generated in the current working directory
-- Employee directories must start with '~' (e.g., ~john-doe)
-- Project directories are processed recursively
-- PDF conversion automatically resizes images >4000px to prevent LaTeX errors
-- Chinese characters are preserved using ctexart document class
-- Invalid/corrupted images are skipped with warnings
 - Temporary files are automatically cleaned up after processing"##
-    )]
+
+)]
 pub struct Cli {
     /// Output directory for generated files (default: current directory)
     #[arg(
@@ -120,6 +112,15 @@ EXAMPLES:
 This option works with all commands (md, pdf, split, jira, html2pdf, jira2pdf)."#
     )]
     pub output_dir: Option<PathBuf>,
+
+    /// Enable verbose output with detailed processing information
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        global = true,
+        help = "Enable verbose output with detailed processing information"
+    )]
+    pub verbose: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -219,7 +220,9 @@ Output files are generated in the current working directory."#
     ///
     /// KEY FEATURES:
     /// - Automatic image resizing (max 4000x4000 to prevent LaTeX errors)
-    /// - Chinese character support using ctexart document class
+    /// - Multi-language support: Chinese (ctexart) and Cyrillic/Russian (fontspec)
+    /// - PDF bookmarks from section headers with numbering
+    /// - Table of contents generation (up to 4 levels)
     /// - Syntax highlighting with pygments
     /// - Color links and professional formatting
     /// - Retry logic for LaTeX compilation failures
@@ -227,25 +230,27 @@ Output files are generated in the current working directory."#
     /// - Temporary directory management
     ///
     /// PDF ENGINES:
-    /// - lualatex (default): Best Chinese support, recommended
-    /// - xelatex: Good Chinese support, alternative option
-    /// - pdflatex: Basic support, may have Chinese character issues
+    /// - lualatex (default): Best multi-language support, recommended
+    /// - xelatex: Good Unicode support, alternative option
+    /// - pdflatex: Basic support, may have Unicode issues
     #[command(
         about = "Convert markdown files to PDF with advanced features",
         long_about = r#"Convert markdown files to high-quality PDFs with comprehensive features.
 
 This command provides professional PDF generation with:
 - AUTOMATIC IMAGE PROCESSING: Resizes images >4000px to prevent LaTeX "Dimension too large" errors
-- CHINESE CHARACTER SUPPORT: Uses ctexart document class with lualatex for proper Unicode rendering
+- MULTI-LANGUAGE SUPPORT: Chinese (ctexart), Cyrillic/Russian (fontspec with DejaVu Sans)
+- PDF BOOKMARKS: Automatically generated from markdown headers (# ## ### ####) with numbering
+- TABLE OF CONTENTS: Includes TOC with up to 4 heading levels
 - SYNTAX HIGHLIGHTING: Code blocks rendered with pygments
 - PROFESSIONAL FORMATTING: Color links, proper margins, clean layout
 - ERROR RESILIENCE: Retry logic for compilation failures, skips corrupted images
 - BATCH PROCESSING: Convert entire directories of markdown files
 
 PDF ENGINES:
-  lualatex (default): Best Chinese/Unicode support, recommended for mixed content
-  xelatex: Good Chinese support, faster for simple documents
-  pdflatex: Basic engine, fastest but limited Chinese character support
+  lualatex (default): Best Unicode/multi-language support, recommended for mixed content
+  xelatex: Good Unicode support, faster for simple documents
+  pdflatex: Basic engine, fastest but limited Unicode support
 
 IMAGE HANDLING:
   - Automatically resizes oversized images while maintaining aspect ratio
@@ -256,7 +261,14 @@ IMAGE HANDLING:
 
 OUTPUT:
   PDFs are generated alongside markdown files with .pdf extension
-  Example: document.md → document.pdf"#
+  Example: document.md → document.pdf
+  
+NAVIGATION:
+  Generated PDFs include:
+  - Clickable table of contents at the beginning
+  - PDF bookmarks panel (outline) for easy navigation
+  - Numbered sections in both TOC and bookmarks
+  - Hyperlinked cross-references"#
     )]
     Pdf {
         /// Path to a markdown file or directory to convert to PDF
@@ -281,16 +293,16 @@ but .pdf extension. Images are automatically resized if needed."#
             long_help = r#"LaTeX engine to use for PDF compilation.
 
 ENGINES:
-  lualatex (default): Best Unicode/Chinese support, recommended
-                     Uses ctexart document class for Chinese characters
+  lualatex (default): Best Unicode/multi-language support, recommended
+                     Supports Chinese (ctexart) and Cyrillic/Russian (fontspec)
 
-  xelatex: Good Chinese support, alternative for complex documents
+  xelatex: Good Unicode support, alternative for complex documents
            May be faster than lualatex for simple content
 
-  pdflatex: Basic engine, fastest but limited Chinese character support
-            May produce errors with Chinese text
+  pdflatex: Basic engine, fastest but limited Unicode support
+            May produce errors with non-Latin text
 
-RECOMMENDATION: Use lualatex (default) for best Chinese character support"#
+RECOMMENDATION: Use lualatex (default) for best multi-language support"#
         )]
         engine: String,
     },
@@ -775,4 +787,3 @@ All output files are generated in the output directory."#
         engine: String,
     },
 }
-

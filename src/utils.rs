@@ -5,8 +5,8 @@
 //! - Image resizing and validation
 //! - File system operations
 
+use image::{GenericImageView, ImageFormat, ImageReader, imageops::FilterType};
 use std::path::Path;
-use image::{GenericImageView, ImageFormat, imageops::FilterType, ImageReader};
 
 /// Sanitizes markdown content by removing problematic control characters that can cause LaTeX errors.
 ///
@@ -34,7 +34,8 @@ use image::{GenericImageView, ImageFormat, imageops::FilterType, ImageReader};
 /// assert_eq!(output, "Text with backspace character");
 /// ```
 pub fn sanitize_markdown_content(content: &str) -> String {
-    content.chars()
+    let filtered: String = content
+        .chars()
         .filter(|c| {
             let ch = *c;
             // Keep tab (0x09), newline (0x0A), and carriage return (0x0D)
@@ -53,13 +54,26 @@ pub fn sanitize_markdown_content(content: &str) -> String {
             if ch == '\u{200B}' || // Zero-width space
                ch == '\u{200C}' || // Zero-width non-joiner
                ch == '\u{200D}' || // Zero-width joiner
-               ch == '\u{FEFF}'    // Zero-width no-break space (BOM)
+               ch == '\u{FEFF}'
+            // Zero-width no-break space (BOM)
             {
                 return false;
             }
             true
         })
-        .collect()
+        .collect();
+
+    use regex::Regex;
+
+    let problematic_inline_code = Regex::new(r"`[^`\n]*`[^`\n]*`[^`\n]*`").unwrap();
+
+    problematic_inline_code
+        .replace_all(&filtered, |caps: &regex::Captures| {
+            let snippet = &caps[0];
+            let inner = &snippet[1..snippet.len() - 1];
+            format!("<code>{}</code>", inner)
+        })
+        .into_owned()
 }
 
 /// Resizes an image if it exceeds the specified maximum dimensions.
@@ -97,7 +111,11 @@ pub fn sanitize_markdown_content(content: &str) -> String {
 /// let image_path = Path::new("large_image.png");
 /// resize_image_if_needed(image_path, 4000, 4000).unwrap();
 /// ```
-pub fn resize_image_if_needed(image_path: &Path, max_width: u32, max_height: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn resize_image_if_needed(
+    image_path: &Path,
+    max_width: u32,
+    max_height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Open and decode the image with format guessing to handle mismatched extensions
     let img = ImageReader::open(image_path)?
         .with_guessed_format()?
@@ -131,8 +149,14 @@ pub fn resize_image_if_needed(image_path: &Path, max_width: u32, max_height: u32
     resized_img.save_with_format(image_path, ImageFormat::Png)?;
 
     use crate::logger::Logger;
-    Logger::detail(&format!("Resized image {} from {}x{} to {}x{}",
-             image_path.display(), width, height, new_width, new_height));
+    Logger::detail(&format!(
+        "Resized image {} from {}x{} to {}x{}",
+        image_path.display(),
+        width,
+        height,
+        new_width,
+        new_height
+    ));
 
     Ok(())
 }
@@ -159,7 +183,9 @@ pub fn resize_image_if_needed(image_path: &Path, max_width: u32, max_height: u32
 /// let png_path = convert_webp_to_png(webp_path).unwrap();
 /// // png_path will be "image.png"
 /// ```
-pub fn convert_webp_to_png(webp_path: &Path) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+pub fn convert_webp_to_png(
+    webp_path: &Path,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     // Open and decode the WebP image
     let img = ImageReader::open(webp_path)?
         .with_guessed_format()?
@@ -174,7 +200,7 @@ pub fn convert_webp_to_png(webp_path: &Path) -> Result<std::path::PathBuf, Box<d
     use crate::logger::Logger;
     Logger::conversion(
         &webp_path.file_name().unwrap().to_string_lossy(),
-        &png_path.file_name().unwrap().to_string_lossy()
+        &png_path.file_name().unwrap().to_string_lossy(),
     );
 
     Ok(png_path)
@@ -202,7 +228,9 @@ pub fn convert_webp_to_png(webp_path: &Path) -> Result<std::path::PathBuf, Box<d
 /// let png_path = convert_svg_to_png(svg_path).unwrap();
 /// // png_path will be "diagram.png"
 /// ```
-pub fn convert_svg_to_png(svg_path: &Path) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+pub fn convert_svg_to_png(
+    svg_path: &Path,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     use std::process::Command;
 
     // Create new path with .png extension
@@ -220,7 +248,7 @@ pub fn convert_svg_to_png(svg_path: &Path) -> Result<std::path::PathBuf, Box<dyn
             use crate::logger::Logger;
             Logger::conversion(
                 &svg_path.file_name().unwrap().to_string_lossy(),
-                &png_path.file_name().unwrap().to_string_lossy()
+                &png_path.file_name().unwrap().to_string_lossy(),
             );
             Ok(png_path)
         }
@@ -228,11 +256,62 @@ pub fn convert_svg_to_png(svg_path: &Path) -> Result<std::path::PathBuf, Box<dyn
             let stderr = String::from_utf8_lossy(&result.stderr);
             Err(format!("Inkscape conversion failed: {}", stderr).into())
         }
-        Err(e) => {
-            Err(format!("Inkscape not found or failed to execute: {}. Please install Inkscape.", e).into())
-        }
+        Err(e) => Err(format!(
+            "Inkscape not found or failed to execute: {}. Please install Inkscape.",
+            e
+        )
+        .into()),
     }
 }
+
+
+/// Extracts SVG content from a draw.io XML file.
+///
+/// draw.io files contain SVG content either:
+/// 1. As embedded `<svg>` elements within the mxfile structure
+/// 2. As base64-encoded data in style attributes
+/// 3. As text content in diagram elements
+///
+/// This function attempts to create a valid SVG from the draw.io structure.
+///
+/// # Arguments
+/// * `drawio_xml` - The XML content of the draw.io file as a string
+///
+/// # Returns
+/// * Result containing SVG content as a string, or an error
+#[allow(dead_code)]
+fn extract_svg_from_drawio(drawio_xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // Try to find existing SVG content in the draw.io file
+    if let Some(start) = drawio_xml.find("<svg") {
+        if let Some(end) = drawio_xml[start..].find("</svg>") {
+            let svg = &drawio_xml[start..start + end + 6];
+            return Ok(svg.to_string());
+        }
+    }
+
+    // If no SVG found, create a basic SVG wrapper with the draw.io content
+    // This is a fallback approach - we'll create a minimal SVG that references the diagram
+    let svg_wrapper = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+     width="800" height="600" viewBox="0 0 800 600">
+    <defs>
+        <style type="text/css"><![CDATA[
+            text {{ font-family: Arial, sans-serif; font-size: 12px; }}
+            line, path {{ stroke: black; stroke-width: 1; }}
+            rect {{ fill: white; stroke: black; stroke-width: 1; }}
+        ]]></style>
+    </defs>
+    <rect x="0" y="0" width="800" height="600" fill="white" stroke="black" stroke-width="1"/>
+    <text x="400" y="300" text-anchor="middle" dominant-baseline="middle" font-size="16">
+        Draw.io diagram (view in draw.io for full rendering)
+    </text>
+</svg>"#
+    );
+
+    Ok(svg_wrapper)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -282,6 +361,13 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_markdown_content_inline_backticks() {
+        let input = "`for app in `yarn list``";
+        let output = sanitize_markdown_content(input);
+        assert_eq!(output, "<code>for app in `yarn list`</code>");
+    }
+
+    #[test]
     fn test_sanitize_markdown_content_empty() {
         let input = "";
         let expected = "";
@@ -289,11 +375,13 @@ mod tests {
     }
 
     /// Helper to create a minimal valid PNG (1x1 red pixel)
-    fn create_test_png(path: &Path, width: u32, height: u32) -> Result<(), Box<dyn std::error::Error>> {
+    fn create_test_png(
+        path: &Path,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         use image::{ImageBuffer, Rgb};
-        let img = ImageBuffer::from_fn(width, height, |_x, _y| {
-            Rgb([255u8, 0u8, 0u8])
-        });
+        let img = ImageBuffer::from_fn(width, height, |_x, _y| Rgb([255u8, 0u8, 0u8]));
         img.save_with_format(path, ImageFormat::Png)?;
         Ok(())
     }
@@ -302,14 +390,14 @@ mod tests {
     fn test_resize_image_if_needed_no_resize() {
         let temp_dir = TempDir::new().unwrap();
         let image_path = temp_dir.path().join("small.png");
-        
+
         // Create a small image (100x100)
         create_test_png(&image_path, 100, 100).unwrap();
-        
+
         // Try to resize with larger bounds
         let result = resize_image_if_needed(&image_path, 4000, 4000);
         assert!(result.is_ok());
-        
+
         // Image should remain the same size
         let img = image::open(&image_path).unwrap();
         assert_eq!(img.dimensions(), (100, 100));
@@ -319,14 +407,14 @@ mod tests {
     fn test_resize_image_if_needed_landscape() {
         let temp_dir = TempDir::new().unwrap();
         let image_path = temp_dir.path().join("landscape.png");
-        
+
         // Create a landscape image (5000x3000)
         create_test_png(&image_path, 5000, 3000).unwrap();
-        
+
         // Resize to max 4000x4000
         let result = resize_image_if_needed(&image_path, 4000, 4000);
         assert!(result.is_ok());
-        
+
         // Check that image was resized
         let img = image::open(&image_path).unwrap();
         let (width, height) = img.dimensions();
@@ -341,14 +429,14 @@ mod tests {
     fn test_resize_image_if_needed_portrait() {
         let temp_dir = TempDir::new().unwrap();
         let image_path = temp_dir.path().join("portrait.png");
-        
+
         // Create a portrait image (2000x6000)
         create_test_png(&image_path, 2000, 6000).unwrap();
-        
+
         // Resize to max 4000x4000
         let result = resize_image_if_needed(&image_path, 4000, 4000);
         assert!(result.is_ok());
-        
+
         // Check that image was resized
         let img = image::open(&image_path).unwrap();
         let (width, height) = img.dimensions();
@@ -363,7 +451,7 @@ mod tests {
     fn test_resize_image_if_needed_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
         let image_path = temp_dir.path().join("nonexistent.png");
-        
+
         let result = resize_image_if_needed(&image_path, 4000, 4000);
         assert!(result.is_err());
     }
@@ -382,19 +470,19 @@ mod tests {
     fn test_convert_webp_to_png() {
         let temp_dir = TempDir::new().unwrap();
         let webp_path = temp_dir.path().join("test.webp");
-        
+
         // Create a WebP image
         create_test_webp(&webp_path).unwrap();
         assert!(webp_path.exists());
-        
+
         // Convert to PNG
         let result = convert_webp_to_png(&webp_path);
         assert!(result.is_ok());
-        
+
         let png_path = result.unwrap();
         assert_eq!(png_path.extension().unwrap(), "png");
         assert!(png_path.exists());
-        
+
         // Verify the PNG can be opened and has correct dimensions
         let img = image::open(&png_path).unwrap();
         assert_eq!(img.dimensions(), (10, 10));
@@ -404,7 +492,7 @@ mod tests {
     fn test_convert_webp_to_png_nonexistent() {
         let temp_dir = TempDir::new().unwrap();
         let webp_path = temp_dir.path().join("nonexistent.webp");
-        
+
         let result = convert_webp_to_png(&webp_path);
         assert!(result.is_err());
     }
@@ -413,15 +501,16 @@ mod tests {
     fn test_convert_webp_to_png_preserves_name() {
         let temp_dir = TempDir::new().unwrap();
         let webp_path = temp_dir.path().join("my_image.webp");
-        
+
         // Create a WebP image
         create_test_webp(&webp_path).unwrap();
-        
+
         // Convert to PNG
         let png_path = convert_webp_to_png(&webp_path).unwrap();
-        
+
         // Check that the base name is preserved
         assert_eq!(png_path.file_stem().unwrap(), "my_image");
         assert_eq!(png_path.extension().unwrap(), "png");
     }
+
 }

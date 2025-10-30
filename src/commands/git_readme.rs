@@ -1,14 +1,14 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use walkdir::WalkDir;
+use crate::logger::Logger;
+use crate::processing::filetype;
+use crate::utils::{convert_svg_to_png, convert_webp_to_png};
 use rayon::prelude::*;
 use regex::Regex;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use crate::processing::filetype;
-use crate::utils::{convert_webp_to_png, convert_svg_to_png};
-use crate::logger::Logger;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use walkdir::WalkDir;
 
 /// Processes a directory containing Git repositories and extracts README.md files.
 ///
@@ -21,7 +21,10 @@ use crate::logger::Logger;
 pub fn process_git_repositories(repos_dir: &Path, output_dir: &Path) {
     // Validate input directory exists
     if !repos_dir.exists() {
-        Logger::error(&format!("Repository directory not found: {}", repos_dir.display()));
+        Logger::error(&format!(
+            "Repository directory not found: {}",
+            repos_dir.display()
+        ));
         return;
     }
 
@@ -66,8 +69,13 @@ pub fn process_git_repositories(repos_dir: &Path, output_dir: &Path) {
     let success_count = successful.load(Ordering::SeqCst);
     let failures_vec = Arc::try_unwrap(failures).unwrap().into_inner().unwrap();
     let failed_count = failures_vec.len();
-    
-    Logger::parallel_complete(success_count, failed_count, total_repos, "README extraction");
+
+    Logger::parallel_complete(
+        success_count,
+        failed_count,
+        total_repos,
+        "README extraction",
+    );
     Logger::parallel_failures(&failures_vec);
 }
 
@@ -98,7 +106,7 @@ fn get_git_logs(repo_dir: &Path) -> String {
 
                 // Parse commits and collect them
                 let mut commits: Vec<(String, String, String, String, String)> = Vec::new();
-                
+
                 for line in log_content.lines() {
                     let parts: Vec<&str> = line.split('|').collect();
                     if parts.len() >= 5 {
@@ -107,7 +115,7 @@ fn get_git_logs(repo_dir: &Path) -> String {
                         let author_email = parts[2].to_string();
                         let commit_hash = parts[3].to_string();
                         let message = parts[4].to_string();
-                        
+
                         commits.push((timestamp, author_name, author_email, commit_hash, message));
                     }
                 }
@@ -121,7 +129,7 @@ fn get_git_logs(repo_dir: &Path) -> String {
 
                 // Format as markdown with heading, message, and bullet list
                 let mut result = String::from("\n## Git Logs\n\n");
-                
+
                 for (timestamp, author_name, author_email, commit_hash, message) in commits {
                     // Extract date from timestamp (YYYY-MM-DD HH:MM:SS +ZZZZ format)
                     let date_part = if let Some(space_idx) = timestamp.find(' ') {
@@ -129,20 +137,20 @@ fn get_git_logs(repo_dir: &Path) -> String {
                     } else {
                         &timestamp
                     };
-                    
+
                     // Extract timezone from timestamp (last part after space)
                     let timezone = if let Some(last_space_idx) = timestamp.rfind(' ') {
                         &timestamp[last_space_idx + 1..]
                     } else {
                         "UTC"
                     };
-                    
+
                     // Add commit heading with date
                     result.push_str(&format!("### {}\n\n", date_part));
-                    
+
                     // Add commit message as body
                     result.push_str(&format!("{}\n\n", message));
-                    
+
                     // Add commit details as bullet list
                     result.push_str(&format!("* Author: {}\n", author_name));
                     result.push_str(&format!("* Email: {}\n", author_email));
@@ -167,8 +175,12 @@ fn get_git_logs(repo_dir: &Path) -> String {
 ///
 /// # Returns
 /// * `Result<(), Box<dyn std::error::Error>>` - Success or error with details
-fn process_single_repository(repo_dir: &Path, output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let repo_name = repo_dir.file_name()
+fn process_single_repository(
+    repo_dir: &Path,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo_name = repo_dir
+        .file_name()
         .ok_or("Could not get repository name")?
         .to_string_lossy()
         .to_string();
@@ -259,7 +271,7 @@ fn process_readme_content(
             if link.ends_with(".md") || link.ends_with(".markdown") {
                 // Resolve the markdown file path
                 let md_path = repo_dir.join(&link);
-                
+
                 if md_path.exists() {
                     // Read and embed the markdown file
                     match fs::read_to_string(&md_path) {
@@ -307,12 +319,14 @@ fn process_readme_content(
 /// * `String` - The content with adjusted header levels
 fn adjust_markdown_headers(content: &str) -> String {
     let header_regex = Regex::new(r"(?m)^(#{1,5})(\s+.*)$").unwrap();
-    
-    header_regex.replace_all(content, |caps: &regex::Captures| {
-        let hashes = &caps[1];
-        let rest = &caps[2];
-        format!("#{}{}", hashes, rest)
-    }).to_string()
+
+    header_regex
+        .replace_all(content, |caps: &regex::Captures| {
+            let hashes = &caps[1];
+            let rest = &caps[2];
+            format!("#{}{}", hashes, rest)
+        })
+        .to_string()
 }
 
 /// Copies linked resources to the resources directory and updates links in the content.
@@ -356,7 +370,7 @@ fn copy_readme_resources(
 
         // Resolve the link to an actual file path
         let source_path = repo_dir.join(link);
-        
+
         if source_path.exists() && source_path.is_file() {
             // Create resources directory on first use
             if !resources_created {
@@ -365,7 +379,7 @@ fn copy_readme_resources(
             }
 
             let _original_file_name = source_path.file_name().unwrap().to_string_lossy();
-            
+
             // Check if it's a WebP or SVG file and convert to PNG
             let source_to_copy = if let Some(ext) = source_path.extension() {
                 let ext_lower = ext.to_string_lossy().to_lowercase();
@@ -385,16 +399,21 @@ fn copy_readme_resources(
             } else {
                 source_path.clone()
             };
-            
+
             // Detect if file type doesn't match extension (like md/html2pdf modes)
-            let final_file_name = if let Some(correct_ext) = filetype::get_corrected_extension(&source_to_copy) {
-                let stem = source_to_copy.file_stem().unwrap().to_string_lossy();
-                _corrected_count += 1;
-                format!("{}.{}", stem, correct_ext)
-            } else {
-                source_to_copy.file_name().unwrap().to_string_lossy().to_string()
-            };
-            
+            let final_file_name =
+                if let Some(correct_ext) = filetype::get_corrected_extension(&source_to_copy) {
+                    let stem = source_to_copy.file_stem().unwrap().to_string_lossy();
+                    _corrected_count += 1;
+                    format!("{}.{}", stem, correct_ext)
+                } else {
+                    source_to_copy
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                };
+
             let dest_path = resources_dir.join(&final_file_name);
 
             // Copy the file
@@ -412,11 +431,11 @@ fn copy_readme_resources(
 
 /// Checks if a link is an external URL (starts with http://, https://, etc.)
 fn is_external_url(link: &str) -> bool {
-    link.starts_with("http://") ||
-    link.starts_with("https://") ||
-    link.starts_with("ftp://") ||
-    link.starts_with("mailto:") ||
-    link.starts_with("//") // Protocol-relative URLs
+    link.starts_with("http://")
+        || link.starts_with("https://")
+        || link.starts_with("ftp://")
+        || link.starts_with("mailto:")
+        || link.starts_with("//") // Protocol-relative URLs
 }
 
 #[cfg(test)]
@@ -433,7 +452,7 @@ More content
 Even more content"#;
 
         let adjusted = adjust_markdown_headers(content);
-        
+
         assert!(adjusted.contains("## Header 1"));
         assert!(adjusted.contains("### Header 2"));
         assert!(adjusted.contains("#### Header 3"));
@@ -453,7 +472,7 @@ Even more content"#;
         assert!(is_external_url("ftp://example.com"));
         assert!(is_external_url("mailto:test@example.com"));
         assert!(is_external_url("//cdn.example.com/image.png"));
-        
+
         assert!(!is_external_url("image.png"));
         assert!(!is_external_url("docs/readme.md"));
         assert!(!is_external_url("../other/file.pdf"));
@@ -472,14 +491,14 @@ This is a test README.
 
         let repo_dir = std::env::temp_dir();
         let result = process_readme_content(content, &repo_dir);
-        
+
         assert!(result.is_ok());
         let (processed, links) = result.unwrap();
-        
+
         // Should contain both links
         assert!(links.contains(&"images/logo.png".to_string()));
         assert!(links.contains(&"docs/guide.md".to_string()));
-        
+
         // Original content should be preserved when markdown file doesn't exist
         assert!(processed.contains("![Image](images/logo.png)"));
     }
@@ -487,10 +506,10 @@ This is a test README.
     #[test]
     fn test_process_readme_content_with_embedding() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
-        
+
         // Create a linked markdown file
         let docs_dir = repo_dir.join("docs");
         fs::create_dir_all(&docs_dir).unwrap();
@@ -500,16 +519,16 @@ Steps here
 ### Details
 More info"#;
         fs::write(docs_dir.join("guide.md"), guide_content).unwrap();
-        
+
         let readme_content = r#"# Main README
 See [Guide](docs/guide.md) for details.
 "#;
 
         let result = process_readme_content(readme_content, repo_dir);
         assert!(result.is_ok());
-        
+
         let (processed, _links) = result.unwrap();
-        
+
         // The guide should be embedded
         assert!(processed.contains("<!-- Embedded from docs/guide.md -->"));
         assert!(processed.contains("## Guide Title")); // Header pushed one level
@@ -529,13 +548,13 @@ See [Guide](docs/guide.md) for details.
 
         let repo_dir = std::env::temp_dir();
         let result = process_readme_content(content, &repo_dir);
-        
+
         assert!(result.is_ok());
         let (processed, links) = result.unwrap();
-        
+
         // External links should not be in the links list
         assert!(links.is_empty());
-        
+
         // External links should be preserved in content
         assert!(processed.contains("https://github.com/user/repo"));
         assert!(processed.contains("http://example.com"));
@@ -546,47 +565,52 @@ See [Guide](docs/guide.md) for details.
     #[test]
     fn test_process_single_repository_no_readme() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path().join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        
+
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         // No README file exists
         let result = process_single_repository(&repo_dir, &output_dir);
-        
+
         // Should return an error
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No README.md or readme.md found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No README.md or readme.md found")
+        );
     }
 
     #[test]
     fn test_process_single_repository_with_readme() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path().join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        
+
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         // Create a simple README
         let readme_content = r#"# Test Project
 This is a test."#;
         fs::write(repo_dir.join("README.md"), readme_content).unwrap();
-        
+
         let result = process_single_repository(&repo_dir, &output_dir);
-        
+
         // Should succeed
         assert!(result.is_ok());
-        
+
         // Check output file exists
         let output_file = output_dir.join("test-repo-README.md");
         assert!(output_file.exists());
-        
+
         // Check content
         let output_content = fs::read_to_string(&output_file).unwrap();
         assert!(output_content.contains("# Test Project"));
@@ -596,23 +620,23 @@ This is a test."#;
     #[test]
     fn test_process_single_repository_lowercase_readme() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path().join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        
+
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         // Create readme.md (lowercase)
         let readme_content = r#"# Lowercase README"#;
         fs::write(repo_dir.join("readme.md"), readme_content).unwrap();
-        
+
         let result = process_single_repository(&repo_dir, &output_dir);
-        
+
         // Should succeed
         assert!(result.is_ok());
-        
+
         // Check output file exists
         let output_file = output_dir.join("test-repo-README.md");
         assert!(output_file.exists());
@@ -621,38 +645,38 @@ This is a test."#;
     #[test]
     fn test_process_single_repository_with_resources() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path().join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        
+
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         // Create images directory and a fake image
         let images_dir = repo_dir.join("images");
         fs::create_dir_all(&images_dir).unwrap();
         fs::write(images_dir.join("logo.png"), "fake png data").unwrap();
-        
+
         // Create README with image link
         let readme_content = r#"# Test Project
 ![Logo](images/logo.png)
 "#;
         fs::write(repo_dir.join("README.md"), readme_content).unwrap();
-        
+
         let result = process_single_repository(&repo_dir, &output_dir);
-        
+
         // Should succeed
         assert!(result.is_ok());
-        
+
         // Check output file exists
         let output_file = output_dir.join("test-repo-README.md");
         assert!(output_file.exists());
-        
+
         // Check content has updated link
         let output_content = fs::read_to_string(&output_file).unwrap();
         assert!(output_content.contains("test-repo-files/logo.png"));
-        
+
         // Check image was copied
         let copied_image = output_dir.join("test-repo-files").join("logo.png");
         assert!(copied_image.exists());
@@ -661,22 +685,22 @@ This is a test."#;
     #[test]
     fn test_copy_readme_resources_skips_external_urls() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
         let resources_dir = temp_dir.path().join("resources");
-        
+
         let content = r#"![External](https://example.com/image.png)"#;
         let links = vec!["https://example.com/image.png".to_string()];
-        
+
         let result = copy_readme_resources(content, &links, repo_dir, &resources_dir, "test-repo");
-        
+
         assert!(result.is_ok());
         let updated = result.unwrap();
-        
+
         // Content should be unchanged
         assert_eq!(content, updated);
-        
+
         // Resources directory should not be created (no local files)
         assert!(!resources_dir.exists());
     }
@@ -684,27 +708,27 @@ This is a test."#;
     #[test]
     fn test_copy_readme_resources_skips_markdown_files() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
         let resources_dir = temp_dir.path().join("resources");
-        
+
         // Create a markdown file
         let docs_dir = repo_dir.join("docs");
         fs::create_dir_all(&docs_dir).unwrap();
         fs::write(docs_dir.join("guide.md"), "# Guide").unwrap();
-        
+
         let content = r#"[Guide](docs/guide.md)"#;
         let links = vec!["docs/guide.md".to_string()];
-        
+
         let result = copy_readme_resources(content, &links, repo_dir, &resources_dir, "test-repo");
-        
+
         assert!(result.is_ok());
         let updated = result.unwrap();
-        
+
         // Content should be unchanged (markdown files are embedded, not copied)
         assert_eq!(content, updated);
-        
+
         // Resources directory should not be created
         assert!(!resources_dir.exists());
     }
@@ -718,11 +742,11 @@ Code: `# not a header`
 Text"#;
 
         let adjusted = adjust_markdown_headers(content);
-        
+
         // Headers should be adjusted
         assert!(adjusted.contains("## Header"));
         assert!(adjusted.contains("### Another Header"));
-        
+
         // Regular text and code should be preserved
         assert!(adjusted.contains("Regular text with # symbol in it"));
         assert!(adjusted.contains("Code: `# not a header`"));
@@ -735,7 +759,7 @@ Text"#;
 ##  Header with multiple spaces"#;
 
         let adjusted = adjust_markdown_headers(content);
-        
+
         // Only headers with proper spacing should be adjusted
         assert!(adjusted.contains("#Header without space")); // Not adjusted (no space)
         assert!(adjusted.contains("## Header with space")); // Adjusted
@@ -745,34 +769,34 @@ Text"#;
     #[test]
     fn test_process_readme_content_nested_embedding() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
-        
+
         // Create nested markdown files
         let docs_dir = repo_dir.join("docs");
         fs::create_dir_all(&docs_dir).unwrap();
-        
+
         // Main guide that links to another file
         let guide_content = r#"# Guide
 See [API docs](api.md)
 "#;
         fs::write(docs_dir.join("guide.md"), guide_content).unwrap();
-        
+
         // API docs
         let api_content = r#"# API Reference
 ## Methods"#;
         fs::write(docs_dir.join("api.md"), api_content).unwrap();
-        
+
         let readme_content = r#"# README
 [Guide](docs/guide.md)
 "#;
 
         let result = process_readme_content(readme_content, repo_dir);
         assert!(result.is_ok());
-        
+
         let (processed, _links) = result.unwrap();
-        
+
         // Both files should be embedded
         assert!(processed.contains("## Guide")); // First level embedding
         // Note: The second level embedding would require recursive resolution
@@ -782,17 +806,17 @@ See [API docs](api.md)
     #[test]
     fn test_process_git_repositories_empty_directory() {
         use tempfile::TempDir;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let repos_dir = temp_dir.path().join("repos");
         fs::create_dir_all(&repos_dir).unwrap();
-        
+
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         // Should handle empty directory gracefully (just log a warning)
         process_git_repositories(&repos_dir, &output_dir);
-        
+
         // No output files should be created
         let entries: Vec<_> = fs::read_dir(&output_dir).unwrap().collect();
         assert_eq!(entries.len(), 0);
@@ -800,8 +824,8 @@ See [API docs](api.md)
 
     #[test]
     fn test_get_git_logs_format() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
@@ -855,19 +879,28 @@ See [API docs](api.md)
         // Verify logs contain expected elements
         assert!(logs.contains("## Git Logs"), "Should have Git Logs header");
         assert!(logs.contains("### "), "Should have date heading");
-        assert!(logs.contains("Initial commit"), "Should contain commit message");
-        assert!(logs.contains("* Author: Test User"), "Should contain author");
-        assert!(logs.contains("* Email: test@example.com"), "Should contain email");
+        assert!(
+            logs.contains("Initial commit"),
+            "Should contain commit message"
+        );
+        assert!(
+            logs.contains("* Author: Test User"),
+            "Should contain author"
+        );
+        assert!(
+            logs.contains("* Email: test@example.com"),
+            "Should contain email"
+        );
         assert!(logs.contains("* Timezone:"), "Should contain timezone");
         assert!(logs.contains("* Commit:"), "Should contain commit hash");
     }
 
     #[test]
     fn test_get_git_logs_multiple_commits_sorted_ascending() {
-        use tempfile::TempDir;
         use std::process::Command;
         use std::thread;
         use std::time::Duration;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
@@ -935,8 +968,8 @@ See [API docs](api.md)
 
     #[test]
     fn test_get_git_logs_empty_repo() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
@@ -957,8 +990,8 @@ See [API docs](api.md)
 
     #[test]
     fn test_git_logs_contains_all_fields() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
@@ -1028,13 +1061,13 @@ See [API docs](api.md)
 
     #[test]
     fn test_process_single_repository_appends_git_logs() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_parent = temp_dir.path().join("repos");
         fs::create_dir_all(&repo_parent).unwrap();
-        
+
         // Create a test repository inside a named directory
         let repo_dir = repo_parent.join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
@@ -1088,7 +1121,7 @@ See [API docs](api.md)
         // Process the repository
         let output_dir = temp_dir.path().join("output");
         fs::create_dir_all(&output_dir).unwrap();
-        
+
         let result = process_single_repository(&repo_dir, &output_dir);
         assert!(result.is_ok(), "process_single_repository should succeed");
 
@@ -1142,7 +1175,7 @@ See [API docs](api.md)
 ###### Level 6"#;
 
         let output = adjust_markdown_headers(input);
-        
+
         // Headers with 1-5 hashes should be incremented by one
         assert!(output.contains("## Level 1"));
         assert!(output.contains("### Level 2"));
@@ -1220,8 +1253,8 @@ See [API docs](api.md)
 
     #[test]
     fn test_get_git_logs_with_special_commit_message() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repo_dir = temp_dir.path();
@@ -1276,8 +1309,8 @@ See [API docs](api.md)
 
     #[test]
     fn test_process_git_repositories_with_no_readme() {
-        use tempfile::TempDir;
         use std::process::Command;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let repos_dir = temp_dir.path().join("repos");
@@ -1286,7 +1319,7 @@ See [API docs](api.md)
         // Create a git repository without README
         let repo_dir = repos_dir.join("test-repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        
+
         Command::new("git")
             .arg("init")
             .current_dir(&repo_dir)

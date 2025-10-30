@@ -8,18 +8,32 @@
 //! - PROGRESS: Operation progress (cyan)
 
 use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Mutex;
-use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Global mutex for synchronized output in multi-threaded contexts
 static OUTPUT_LOCK: Mutex<()> = Mutex::new(());
+
+// Global verbose mode flag
+static VERBOSE_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Main logger struct for GFW Helper
 pub struct Logger;
 
 #[allow(dead_code)]
 impl Logger {
+    /// Set verbose mode (should be called at application start)
+    pub fn set_verbose(enabled: bool) {
+        VERBOSE_MODE.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Check if verbose mode is enabled
+    pub fn is_verbose() -> bool {
+        VERBOSE_MODE.load(Ordering::Relaxed)
+    }
     /// Print application header
     pub fn header(version: &str) {
         println!("{}", "═".repeat(80).bright_blue());
@@ -62,11 +76,18 @@ impl Logger {
     /// Print a progress/step message
     pub fn progress(step: &str, message: &str) {
         let _lock = OUTPUT_LOCK.lock().unwrap();
-        println!("\n  {} {}", step.bright_cyan().bold(), message.bright_white());
+        println!(
+            "\n  {} {}",
+            step.bright_cyan().bold(),
+            message.bright_white()
+        );
     }
 
-    /// Print a sub-item message (indented)
+    /// Print a sub-item message (indented) - only shown in verbose mode
     pub fn detail(message: &str) {
+        if !Self::is_verbose() {
+            return;
+        }
         let _lock = OUTPUT_LOCK.lock().unwrap();
         println!("    · {}", message.bright_black());
     }
@@ -98,7 +119,11 @@ impl Logger {
     pub fn workflow_complete(summary: &str) {
         let _lock = OUTPUT_LOCK.lock().unwrap();
         println!("\n{}", "═".repeat(80).bright_green());
-        println!("  {} {}", "✓".bright_green(), "Workflow Complete!".bright_white().bold());
+        println!(
+            "  {} {}",
+            "✓".bright_green(),
+            "Workflow Complete!".bright_white().bold()
+        );
         println!("  {}", summary.bright_black());
         println!("{}", "═".repeat(80).bright_green());
     }
@@ -118,9 +143,16 @@ impl Logger {
         Self::detail(&format!("{}: {}", operation, path.display()));
     }
 
-    /// Print conversion message
+    /// Print conversion message - only shown in verbose mode
     pub fn conversion(from: &str, to: &str) {
-        Self::detail(&format!("Converting: {} → {}", from.bright_blue(), to.bright_green()));
+        if !Self::is_verbose() {
+            return;
+        }
+        Self::detail(&format!(
+            "Converting: {} → {}",
+            from.bright_blue(),
+            to.bright_green()
+        ));
     }
 
     /// Print statistics message
@@ -140,12 +172,13 @@ impl Logger {
             "█".repeat(filled).bright_green(),
             "░".repeat(bar_width - filled).bright_black()
         );
-        print!("\r  {} {}/{} ({}%) {}", 
-               bar,
-               current.to_string().bright_cyan(),
-               total.to_string().bright_white(),
-               percentage.to_string().bright_yellow(),
-               message.bright_black()
+        print!(
+            "\r  {} {}/{} ({}%) {}",
+            bar,
+            current.to_string().bright_cyan(),
+            total.to_string().bright_white(),
+            percentage.to_string().bright_yellow(),
+            message.bright_black()
         );
         io::stdout().flush().unwrap();
         if current == total {
@@ -153,15 +186,57 @@ impl Logger {
         }
     }
 
+    /// Create a progress bar for long-running operations
+    pub fn create_progress_bar(total: u64, message: &str) -> ProgressBar {
+        let pb = ProgressBar::new(total);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  [{bar:30.green/black}] {pos}/{len} ({percent}%) {msg}")
+                .unwrap()
+                .progress_chars("█▓░"),
+        );
+        pb.set_message(message.to_string());
+        pb
+    }
+
+    /// Create a spinner for indeterminate operations
+    pub fn create_spinner(message: &str) -> ProgressBar {
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("  {spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        spinner.set_message(message.to_string());
+        spinner
+    }
+
     /// Print parallel operation completion summary
     pub fn parallel_complete(successful: usize, failed: usize, total: usize, operation: &str) {
         let _lock = OUTPUT_LOCK.lock().unwrap();
-        println!("\n  {} Completed {} operations:", "✓".bright_green(), operation);
-        println!("    {} {} successful", "✓".bright_green(), successful.to_string().bright_green());
+        println!(
+            "\n  {} Completed {} operations:",
+            "✓".bright_green(),
+            operation
+        );
+        println!(
+            "    {} {} successful",
+            "✓".bright_green(),
+            successful.to_string().bright_green()
+        );
         if failed > 0 {
-            println!("    {} {} failed", "✗".bright_red(), failed.to_string().bright_red());
+            println!(
+                "    {} {} failed",
+                "✗".bright_red(),
+                failed.to_string().bright_red()
+            );
         }
-        println!("    {} {} total", "●".bright_blue(), total.to_string().bright_white());
+        println!(
+            "    {} {} total",
+            "●".bright_blue(),
+            total.to_string().bright_white()
+        );
     }
 
     /// Print detailed failure list with error messages
@@ -169,11 +244,12 @@ impl Logger {
         if failures.is_empty() {
             return;
         }
-        
+
         let _lock = OUTPUT_LOCK.lock().unwrap();
         println!("\n  {} Failed conversions:", "✗".bright_red().bold());
         for (i, (file, error)) in failures.iter().enumerate() {
-            println!("    {}. {} {}", 
+            println!(
+                "    {}. {} {}",
                 (i + 1).to_string().bright_red(),
                 file.bright_white(),
                 "→".bright_black()
@@ -217,14 +293,20 @@ mod tests {
     fn test_parallel_logging() {
         // Test parallel completion logging
         Logger::parallel_complete(18, 2, 20, "test operation");
-        
+
         // Test failure reporting
         let failures = vec![
-            ("file1.md".to_string(), "LaTeX compilation error".to_string()),
-            ("file2.md".to_string(), "Image processing failed".to_string()),
+            (
+                "file1.md".to_string(),
+                "LaTeX compilation error".to_string(),
+            ),
+            (
+                "file2.md".to_string(),
+                "Image processing failed".to_string(),
+            ),
         ];
         Logger::parallel_failures(&failures);
-        
+
         // Test with empty failures (should not print anything)
         let empty: Vec<(String, String)> = vec![];
         Logger::parallel_failures(&empty);
